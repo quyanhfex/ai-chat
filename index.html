@@ -46,7 +46,8 @@ input.pw{text-align:center;letter-spacing:.12em;font-size:20px;text-transform:up
 .empty{text-align:center;color:var(--mut);margin-top:18vh}
 footer{border-top:1px solid var(--line);background:var(--card);padding-block:10px calc(10px + env(safe-area-inset-bottom));padding-inline:16px}
 .bar{display:flex;gap:8px;align-items:flex-end}
-.bar textarea{resize:none;max-height:180px;min-height:44px}
+.bar textarea{resize:none;max-height:180px;min-height:44px;overflow-y:hidden}
+#send{white-space:nowrap;min-width:84px}
 #hint{min-height:1.3em;margin-top:4px}
 </style>
 </head>
@@ -67,16 +68,17 @@ footer{border-top:1px solid var(--line);background:var(--card);padding-block:10p
   <div id="log"><div class="wrap" id="msgs"></div></div>
   <footer><div class="wrap">
     <div class="bar">
-      <textarea id="box" rows="1" placeholder="Nhập câu hỏi… (Enter để gửi, Shift+Enter xuống dòng)"></textarea>
+      <textarea id="box" rows="1" placeholder="Nhập câu hỏi…"></textarea>
       <button id="send" onclick="send()">Gửi</button>
     </div>
-    <div id="hint" class="small mut">Lịch sử trò chuyện chỉ nằm trong trình duyệt này, máy chủ không lưu.</div>
+    <div id="hint" class="small mut"></div>
   </div></footer>
 </div>
 
 <script>
 const API = "https://anhquy04102005--gemma-chat-web.modal.run";
 const GAP = 10; // giay giua 2 lan gui, khop voi cong chat
+const HINT = "Enter để gửi · Shift+Enter xuống dòng · Lịch sử chỉ nằm trong trình duyệt này, máy chủ không lưu.";
 const $ = id => document.getElementById(id);
 const store = {
   get(k, d){ try { const v = localStorage.getItem("gc-" + k); return v === null ? d : JSON.parse(v) } catch(e){ return d } },
@@ -100,6 +102,7 @@ function showLogin(msg){
 function showChat(){
   clearTimeout(pollTimer);
   $("screen").hidden = true; $("chat").hidden = false; $("hbtn").hidden = false;
+  if (!streaming) hint(HINT);
   renderAll(); setTimeout(() => $("box").focus(), 50);
 }
 function poll(ms){ clearTimeout(pollTimer); pollTimer = setTimeout(boot, ms) }
@@ -144,6 +147,8 @@ function md(text){
   return parts.map((p, i) => {
     if (i % 2){ const nl = p.indexOf("\n"); const code = nl >= 0 && /^[\w+-]*$/.test(p.slice(0, nl).trim()) ? p.slice(nl + 1) : p;
       return `<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>` }
+    if (i > 0) p = p.replace(/^\n+/, "");                  // bo dong trong sat khoi code:
+    if (i < parts.length - 1) p = p.replace(/\n+$/, "");  // <pre> da co khoang cach rieng
     return esc(p)
       .replace(/`([^`\n]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
@@ -249,11 +254,15 @@ async function send(retried){
   history = [...msgs, {role:"assistant", content:answer}];
   store.set("history", history);
   abub.replaceWith(bubble({role:"assistant", content:answer}, note ? `<div class="note">${esc(note)}</div>` : ""));
-  hint(note ? note : "Lịch sử trò chuyện chỉ nằm trong trình duyệt này, máy chủ không lưu.", !!note);
+  hint(note || HINT, !!note);
   scrollDown();
 }
 
-function autosize(){ const b = $("box"); b.style.height = "auto"; b.style.height = Math.min(b.scrollHeight, 180) + "px" }
+function autosize(){
+  const b = $("box"); b.style.height = "auto";
+  b.style.height = Math.min(b.scrollHeight, 180) + "px";
+  b.style.overflowY = b.scrollHeight > 180 ? "auto" : "hidden";  // chi hien thanh cuon khi that su dai
+}
 $("box").addEventListener("input", autosize);
 $("box").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); send() } });
 boot();
