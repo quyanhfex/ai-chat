@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Gemma Chat</title>
+<title>AI Chat</title>
 <meta name="robots" content="noindex">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%AC%3C/text%3E%3C/svg%3E">
 <style>
@@ -17,6 +17,7 @@ html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
 header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-block:10px;padding-inline:16px;border-bottom:1px solid var(--line);background:var(--card)}
 header h1{font-size:17px;margin:0}
+header h1 small{font-weight:400;color:var(--mut);font-size:13px;margin-left:6px}
 button{font:inherit;border:0;border-radius:8px;padding:8px 14px;background:var(--acc);color:#fff;cursor:pointer}
 button.ghost{background:var(--soft);color:var(--fg)}
 button:disabled{opacity:.55;cursor:not-allowed}
@@ -40,6 +41,9 @@ input.pw{text-align:center;letter-spacing:.12em;font-size:20px;text-transform:up
 .bub pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:10px;overflow-x:auto;white-space:pre;font-size:13px}
 .bub code{font-family:ui-monospace,Consolas,monospace;font-size:13px;background:var(--code);padding:1px 4px;border-radius:4px}
 .bub pre code{background:none;padding:0}
+details.thk{border-left:3px solid var(--line);padding-left:10px;margin:2px 0 10px;color:var(--mut);font-size:14px}
+details.thk summary{cursor:pointer;user-select:none}
+.thk-t{white-space:pre-wrap;max-height:260px;overflow-y:auto;margin-top:6px}
 .note{font-size:13px;color:var(--warn);margin-top:6px}
 .typing::after{content:"▍";animation:b 1s steps(1) infinite}
 @keyframes b{50%{opacity:0}}
@@ -48,12 +52,15 @@ footer{border-top:1px solid var(--line);background:var(--card);padding-block:10p
 .bar{display:flex;gap:8px;align-items:flex-end}
 .bar textarea{resize:none;max-height:180px;min-height:44px;overflow-y:hidden}
 #send{white-space:nowrap;min-width:84px}
-#hint{min-height:1.3em;margin-top:4px}
+.opts{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:6px}
+.opts label{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;user-select:none}
+.opts input{width:auto;margin:0}
+#hint{min-height:1.3em}
 </style>
 </head>
 <body>
 <header>
-  <h1>Gemma Chat</h1>
+  <h1>AI Chat<small>Qwen3.8 27B</small></h1>
   <div id="hbtn" hidden>
     <button class="ghost" onclick="newChat()">Cuộc trò chuyện mới</button>
     <button class="ghost" onclick="signOut()">Thoát</button>
@@ -71,27 +78,31 @@ footer{border-top:1px solid var(--line);background:var(--card);padding-block:10p
       <textarea id="box" rows="1" placeholder="Nhập câu hỏi…"></textarea>
       <button id="send" onclick="send()">Gửi</button>
     </div>
-    <div id="hint" class="small mut"></div>
+    <div class="opts">
+      <label title="Model suy nghĩ trước khi trả lời: kỹ hơn nhưng chậm hơn"><input type="checkbox" id="think" onchange="store.set('think', this.checked)"> Suy nghĩ kỹ</label>
+      <div id="hint" class="small mut"></div>
+    </div>
   </div></footer>
 </div>
 
 <script>
-const API = "https://anhquy04102005--gemma-chat-web.modal.run";
+const API = "https://anhquy04102005--ai-chat-web.modal.run";
 const GAP = 10; // giay giua 2 lan gui, khop voi cong chat
 const HINT = "Enter để gửi · Shift+Enter xuống dòng · Lịch sử chỉ nằm trong trình duyệt này, máy chủ không lưu.";
 const $ = id => document.getElementById(id);
-const store = {
-  get(k, d){ try { const v = localStorage.getItem("gc-" + k); return v === null ? d : JSON.parse(v) } catch(e){ return d } },
-  set(k, v){ try { localStorage.setItem("gc-" + k, JSON.stringify(v)) } catch(e){} },
-  del(k){ try { localStorage.removeItem("gc-" + k) } catch(e){} },
+const store = {  // tien to "ac-": khong dung lai lich su cua trang Gemma cu
+  get(k, d){ try { const v = localStorage.getItem("ac-" + k); return v === null ? d : JSON.parse(v) } catch(e){ return d } },
+  set(k, v){ try { localStorage.setItem("ac-" + k, JSON.stringify(v)); return true } catch(e){ return false } },
+  del(k){ try { localStorage.removeItem("ac-" + k) } catch(e){} },
 };
 let history = store.get("history", []);
 let streaming = null, lastSend = 0, pollTimer = null, cooldownTimer = null;
+$("think").checked = store.get("think", false);
 
 // ---------------------------------------------------------------- man hinh trang thai
 function screen(html){ $("chat").hidden = true; $("hbtn").hidden = true; $("screen").hidden = false; $("screen").innerHTML = `<div class="panel">${html}</div>` }
 function showOff(){ screen(`<h2>Hệ thống đang tắt</h2><div class="mut">Hãy liên hệ người quản trị để mở phiên chat.</div>`); poll(30000) }
-function showBooting(){ screen(`<div class="spin"></div><h2>Máy đang khởi động</h2><div class="mut">Thường mất khoảng 4 phút. Trang sẽ tự vào khi xong.</div>`); poll(10000) }
+function showBooting(){ screen(`<div class="spin"></div><h2>Máy đang khởi động</h2><div class="mut">Thường mất khoảng 4–5 phút. Trang sẽ tự vào khi xong.</div>`); poll(10000) }
 function showLogin(msg){
   screen(`<h2>Nhập mật khẩu</h2><div class="mut small">Mật khẩu do người quản trị cung cấp.</div>
     <input class="pw" id="pw" maxlength="12" autocomplete="off" placeholder="XXXX-XXXX" onkeydown="if(event.key==='Enter')login()">
@@ -192,21 +203,28 @@ async function send(retried){
   const text = $("box").value.trim();
   if (!text || streaming) return;
   if (Date.now()/1000 < lastSend + GAP) return;
+  const thinking = $("think").checked;
   const msgs = [...history, {role:"user", content:text}];
   const ubub = bubble({role:"user", content:text});
   if (!history.length) $("msgs").innerHTML = "";
   $("msgs").appendChild(ubub);
-  const abub = bubble({role:"assistant", content:""}); abub.querySelector(".bub").classList.add("typing");
+  // khung tra loi: [phan suy nghi, thu gon duoc] + [cau tra loi]
+  const abub = document.createElement("div");
+  abub.className = "msg assistant";
+  abub.innerHTML = `<div class="bub"><details class="thk" hidden open><summary>Đang suy nghĩ…</summary><div class="thk-t"></div></details><div class="ans typing"></div></div>`;
+  const thk = abub.querySelector(".thk"), thkT = abub.querySelector(".thk-t"), ans = abub.querySelector(".ans");
   $("msgs").appendChild(abub); scrollDown();
   $("box").value = ""; autosize();
   const ctrl = new AbortController(); streaming = ctrl; setSending(true); hint("Đang gửi…");
 
-  let answer = "", note = "", started = false;
+  let answer = "", note = "", thinkStart = 0, thinkSec = 0;
+  const endThink = () => { if (thinkStart && !thinkSec){ thinkSec = Math.max(1, Math.round((Date.now() - thinkStart)/1000));
+    thk.querySelector("summary").textContent = `Đã suy nghĩ · ${thinkSec} giây (bấm để xem)`; thk.open = false } };
   const undo = msg => { ubub.remove(); abub.remove(); $("box").value = text; autosize(); if (!history.length) renderAll(); hint(msg, true) };
   try {
     const r = await fetch(API + "/api/chat", {method:"POST", signal:ctrl.signal,
       headers:{"Content-Type":"application/json", Authorization:"Bearer " + store.get("token", "")},
-      body:JSON.stringify({messages:msgs})});
+      body:JSON.stringify({messages:msgs, thinking})});
     if (!r.ok){
       const d = await r.json().catch(() => ({}));
       if (r.status === 401 && !retried){
@@ -225,7 +243,6 @@ async function send(retried){
     lastSend = Date.now()/1000;
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "";
-    const bub = abub.querySelector(".bub");
     while (true){
       const {value, done} = await reader.read();
       if (done) break;
@@ -236,8 +253,12 @@ async function send(retried){
         if (!line.startsWith("data: ")) continue;
         const ev = JSON.parse(line.slice(6));
         if (ev.t === "wait") hint("Đang xếp hàng…");
-        else if (ev.t === "start"){ started = true; hint("Đang trả lời…") }
-        else if (ev.t === "delta"){ answer += ev.v; bub.innerHTML = md(answer); bub.classList.add("typing"); scrollDown() }
+        else if (ev.t === "start") hint(thinking ? "Đang suy nghĩ…" : "Đang trả lời…");
+        else if (ev.t === "think"){
+          if (!thinkStart){ thinkStart = Date.now(); thk.hidden = false }
+          thkT.textContent += ev.v; thkT.scrollTop = thkT.scrollHeight; scrollDown();
+        }
+        else if (ev.t === "delta"){ endThink(); hint("Đang trả lời…"); answer += ev.v; ans.innerHTML = md(answer); scrollDown() }
         else if (ev.t === "cut") note = ev.v;
         else if (ev.t === "error") throw new Error(ev.v);
       }
@@ -247,13 +268,14 @@ async function send(retried){
     else if (!answer) return undo(e.message || "Mất kết nối.");
     else note = e.message || "Mất kết nối giữa chừng.";
   } finally {
-    abub.querySelector(".bub") && abub.querySelector(".bub").classList.remove("typing");
+    endThink(); ans.classList.remove("typing");
     streaming = null; setSending(false);
   }
   if (!answer){ return undo(note || "Không nhận được câu trả lời.") }
-  history = [...msgs, {role:"assistant", content:answer}];
-  store.set("history", history);
-  abub.replaceWith(bubble({role:"assistant", content:answer}, note ? `<div class="note">${esc(note)}</div>` : ""));
+  history = [...msgs, {role:"assistant", content:answer}];  // chi luu cau tra loi, khong luu phan suy nghi
+  const saved = store.set("history", history);
+  if (note) ans.insertAdjacentHTML("beforeend", `<div class="note">${esc(note)}</div>`);
+  if (!saved) note = (note ? note + " " : "") + "Cuộc trò chuyện quá dài để lưu trong trình duyệt (vẫn chat tiếp được, nhưng tải lại trang sẽ mất).";
   hint(note || HINT, !!note);
   scrollDown();
 }
