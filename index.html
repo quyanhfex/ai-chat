@@ -56,13 +56,22 @@ footer{border-top:1px solid var(--line);background:var(--card);padding-block:10p
 .opts label{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;user-select:none}
 .opts input{width:auto;margin:0}
 #hint{min-height:1.3em}
+#hbtn{display:flex;gap:6px}
+#hbtn button{white-space:nowrap}
+#hbtn .short{display:none}
+@media (max-width:480px){  /* dien thoai: ten model + 2 nut khong du cho tren 1 dong */
+  header h1 small{display:none}
+  #hbtn button{padding:6px 10px;font-size:13px}
+  #hbtn .long{display:none}
+  #hbtn .short{display:inline}
+}
 </style>
 </head>
 <body>
 <header>
   <h1>AI Chat<small>Qwen3.8 27B</small></h1>
   <div id="hbtn" hidden>
-    <button class="ghost" onclick="newChat()">Cuộc trò chuyện mới</button>
+    <button class="ghost" onclick="newChat()"><span class="long">Cuộc trò chuyện mới</span><span class="short">Mới</span></button>
     <button class="ghost" onclick="signOut()">Thoát</button>
   </div>
 </header>
