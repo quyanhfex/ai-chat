@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gemma Chat</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1b2130;--mut:#667085;--line:#e4e7ec;--soft:#eef0f4;
+  --acc:#3b5bdb;--user:#3b5bdb;--userfg:#fff;--bad:#c01048;--warn:#b54708;--code:#f3f4f6}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1015;--card:#161a22;--fg:#e6e8ee;--mut:#98a2b3;--line:#272c38;
+  --soft:#1d222c;--acc:#6c8cff;--user:#3651c9;--userfg:#fff;--bad:#ff6b8b;--warn:#f5b454;--code:#0b0d12}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-block:10px;padding-inline:16px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:17px;margin:0}
+button{font:inherit;border:0;border-radius:8px;padding:8px 14px;background:var(--acc);color:#fff;cursor:pointer}
+button.ghost{background:var(--soft);color:var(--fg)}
+button:disabled{opacity:.55;cursor:not-allowed}
+.center{flex:1;display:flex;align-items:center;justify-content:center;padding-inline:16px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;max-width:420px;width:100%;text-align:center}
+.panel h2{margin:0 0 6px;font-size:18px}
+.mut{color:var(--mut)}.small{font-size:13px}
+.err{color:var(--bad);min-height:1.4em;margin-top:8px;font-size:14px}
+input,textarea{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%}
+input.pw{text-align:center;letter-spacing:.12em;font-size:20px;text-transform:uppercase;margin-top:12px}
+.spin{width:28px;height:28px;border:3px solid var(--soft);border-top-color:var(--acc);border-radius:50%;margin:4px auto 12px;animation:r 1s linear infinite}
+@keyframes r{to{transform:rotate(1turn)}}
+#chat{flex:1;display:flex;flex-direction:column;min-height:0}
+#log{flex:1;overflow-y:auto;padding-block:16px;padding-inline:16px}
+.wrap{max-width:820px;margin:0 auto}
+.msg{display:flex;margin:10px 0}
+.msg.user{justify-content:flex-end}
+.bub{max-width:88%;padding:10px 14px;border-radius:14px;white-space:normal;overflow-wrap:anywhere}
+.user .bub{background:var(--user);color:var(--userfg);border-bottom-right-radius:4px;white-space:pre-wrap}
+.assistant .bub{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.bub pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:10px;overflow-x:auto;white-space:pre;font-size:13px}
+.bub code{font-family:ui-monospace,Consolas,monospace;font-size:13px;background:var(--code);padding:1px 4px;border-radius:4px}
+.bub pre code{background:none;padding:0}
+.note{font-size:13px;color:var(--warn);margin-top:6px}
+.typing::after{content:"▍";animation:b 1s steps(1) infinite}
+@keyframes b{50%{opacity:0}}
+.empty{text-align:center;color:var(--mut);margin-top:18vh}
+footer{border-top:1px solid var(--line);background:var(--card);padding-block:10px calc(10px + env(safe-area-inset-bottom));padding-inline:16px}
+.bar{display:flex;gap:8px;align-items:flex-end}
+.bar textarea{resize:none;max-height:180px;min-height:44px}
+#hint{min-height:1.3em;margin-top:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Gemma Chat</h1>
+  <div id="hbtn" hidden>
+    <button class="ghost" onclick="newChat()">Cuộc trò chuyện mới</button>
+    <button class="ghost" onclick="signOut()">Thoát</button>
+  </div>
+</header>
+
+<div class="center" id="screen">
+  <div class="panel"><div class="spin"></div><div class="mut">Đang kết nối…</div></div>
+</div>
+
+<div id="chat" hidden>
+  <div id="log"><div class="wrap" id="msgs"></div></div>
+  <footer><div class="wrap">
+    <div class="bar">
+      <textarea id="box" rows="1" placeholder="Nhập câu hỏi… (Enter để gửi, Shift+Enter xuống dòng)"></textarea>
+      <button id="send" onclick="send()">Gửi</button>
+    </div>
+    <div id="hint" class="small mut">Lịch sử trò chuyện chỉ nằm trong trình duyệt này, máy chủ không lưu.</div>
+  </div></footer>
+</div>
+
+<script>
+const API = "https://anhquy04102005--gemma-chat-web.modal.run";
+const GAP = 10; // giay giua 2 lan gui, khop voi cong chat
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try { const v = localStorage.getItem("gc-" + k); return v === null ? d : JSON.parse(v) } catch(e){ return d } },
+  set(k, v){ try { localStorage.setItem("gc-" + k, JSON.stringify(v)) } catch(e){} },
+  del(k){ try { localStorage.removeItem("gc-" + k) } catch(e){} },
+};
+let history = store.get("history", []);
+let streaming = null, lastSend = 0, pollTimer = null, cooldownTimer = null;
+
+// ---------------------------------------------------------------- man hinh trang thai
+function screen(html){ $("chat").hidden = true; $("hbtn").hidden = true; $("screen").hidden = false; $("screen").innerHTML = `<div class="panel">${html}</div>` }
+function showOff(){ screen(`<h2>Hệ thống đang tắt</h2><div class="mut">Hãy liên hệ người quản trị để mở phiên chat.</div>`); poll(30000) }
+function showBooting(){ screen(`<div class="spin"></div><h2>Máy đang khởi động</h2><div class="mut">Thường mất khoảng 4 phút. Trang sẽ tự vào khi xong.</div>`); poll(10000) }
+function showLogin(msg){
+  screen(`<h2>Nhập mật khẩu</h2><div class="mut small">Mật khẩu do người quản trị cung cấp.</div>
+    <input class="pw" id="pw" maxlength="12" autocomplete="off" placeholder="XXXX-XXXX" onkeydown="if(event.key==='Enter')login()">
+    <button style="margin-top:12px;width:100%" id="lbtn" onclick="login()">Vào</button><div class="err" id="lerr">${esc(msg || "")}</div>`);
+  setTimeout(() => $("pw") && $("pw").focus(), 50);
+  poll(30000);
+}
+function showChat(){
+  clearTimeout(pollTimer);
+  $("screen").hidden = true; $("chat").hidden = false; $("hbtn").hidden = false;
+  renderAll(); setTimeout(() => $("box").focus(), 50);
+}
+function poll(ms){ clearTimeout(pollTimer); pollTimer = setTimeout(boot, ms) }
+
+async function boot(){
+  if (streaming) return;
+  let st;
+  try { st = (await (await fetch(API + "/api/status")).json()).state }
+  catch(e){ screen(`<h2>Không kết nối được</h2><div class="mut">Kiểm tra mạng rồi thử lại.</div>`); poll(15000); return }
+  if (st === "off") return showOff();
+  if (st === "booting") return showBooting();
+  if (store.get("token", "")) return showChat();
+  showLogin();
+}
+
+// ---------------------------------------------------------------- dang nhap
+async function doLogin(password){
+  const r = await fetch(API + "/api/login", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({password})});
+  const d = await r.json().catch(() => ({}));
+  if (r.ok){ store.set("token", d.token); store.set("pw", password); return {ok:true, state:d.state} }
+  return {ok:false, status:r.status, error:d.error || ("Lỗi " + r.status)};
+}
+async function login(){
+  const pw = $("pw").value.trim();
+  if (!pw) return;
+  $("lbtn").disabled = true; $("lerr").textContent = "";
+  try {
+    const res = await doLogin(pw);
+    if (res.ok) return res.state === "booting" ? showBooting() : showChat();
+    if (res.status === 403) return showOff();
+    $("lerr").textContent = res.error;
+  } catch(e){ $("lerr").textContent = "Không kết nối được." }
+  finally { if ($("lbtn")) $("lbtn").disabled = false }
+}
+function signOut(){ store.del("token"); store.del("pw"); showLogin() }
+
+// ---------------------------------------------------------------- hien thi tin nhan
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])) }
+function md(text){
+  // markdown toi thieu, AN TOAN: escape het truoc, roi moi dung the. Khong bao gio chen HTML cua model.
+  const parts = String(text).split(/```/);
+  return parts.map((p, i) => {
+    if (i % 2){ const nl = p.indexOf("\n"); const code = nl >= 0 && /^[\w+-]*$/.test(p.slice(0, nl).trim()) ? p.slice(nl + 1) : p;
+      return `<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>` }
+    return esc(p)
+      .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/^#{1,6} (.+)$/gm, "<strong>$1</strong>")
+      .replace(/\n/g, "<br>");
+  }).join("");
+}
+function bubble(m, extra){
+  const el = document.createElement("div");
+  el.className = "msg " + m.role;
+  el.innerHTML = `<div class="bub">${m.role === "user" ? esc(m.content) : md(m.content)}${extra || ""}</div>`;
+  return el;
+}
+function renderAll(){
+  const box = $("msgs"); box.innerHTML = "";
+  if (!history.length) box.innerHTML = `<div class="empty">Bắt đầu bằng một câu hỏi bất kỳ.</div>`;
+  history.forEach(m => box.appendChild(bubble(m)));
+  scrollDown();
+}
+function scrollDown(){ const l = $("log"); l.scrollTop = l.scrollHeight }
+function newChat(){ if (streaming) return; history = []; store.set("history", history); renderAll(); $("box").focus() }
+function hint(t, bad){ $("hint").textContent = t; $("hint").style.color = bad ? "var(--bad)" : "" }
+
+// ---------------------------------------------------------------- gui + nhan stream
+function setSending(on){
+  const b = $("send");
+  if (on){ b.textContent = "Dừng"; b.onclick = () => streaming && streaming.abort(); b.disabled = false }
+  else { b.textContent = "Gửi"; b.onclick = send; cooldown() }
+}
+function cooldown(){
+  clearInterval(cooldownTimer);
+  const tick = () => {
+    const left = Math.ceil(lastSend + GAP - Date.now()/1000);
+    if (left > 0 && !streaming){ $("send").disabled = true; $("send").textContent = `Chờ ${left}s` }
+    else { $("send").disabled = false; if (!streaming) $("send").textContent = "Gửi"; clearInterval(cooldownTimer) }
+  };
+  tick(); cooldownTimer = setInterval(tick, 250);
+}
+
+async function send(retried){
+  const text = $("box").value.trim();
+  if (!text || streaming) return;
+  if (Date.now()/1000 < lastSend + GAP) return;
+  const msgs = [...history, {role:"user", content:text}];
+  const ubub = bubble({role:"user", content:text});
+  if (!history.length) $("msgs").innerHTML = "";
+  $("msgs").appendChild(ubub);
+  const abub = bubble({role:"assistant", content:""}); abub.querySelector(".bub").classList.add("typing");
+  $("msgs").appendChild(abub); scrollDown();
+  $("box").value = ""; autosize();
+  const ctrl = new AbortController(); streaming = ctrl; setSending(true); hint("Đang gửi…");
+
+  let answer = "", note = "", started = false;
+  const undo = msg => { ubub.remove(); abub.remove(); $("box").value = text; autosize(); if (!history.length) renderAll(); hint(msg, true) };
+  try {
+    const r = await fetch(API + "/api/chat", {method:"POST", signal:ctrl.signal,
+      headers:{"Content-Type":"application/json", Authorization:"Bearer " + store.get("token", "")},
+      body:JSON.stringify({messages:msgs})});
+    if (!r.ok){
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 401 && !retried){
+        // cong chat khoi dong lai hoac mat khau doi: thu dang nhap lai bang mat khau da nho
+        const pw = store.get("pw", "");
+        const res = pw ? await doLogin(pw) : {ok:false};
+        streaming = null; setSending(false); ubub.remove(); abub.remove(); $("box").value = text;
+        if (res.ok) return send(true);
+        store.del("token"); return showLogin(pw ? "Mật khẩu đã đổi, hãy nhập mật khẩu mới." : "");
+      }
+      if (r.status === 403){ streaming = null; return showOff() }
+      if (r.status === 503 && d.state === "booting"){ streaming = null; return showBooting() }
+      if (r.status === 429 && d.retry_after) lastSend = Date.now()/1000 - GAP + d.retry_after;
+      return undo(d.error || ("Lỗi " + r.status));
+    }
+    lastSend = Date.now()/1000;
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    const bub = abub.querySelector(".bub");
+    while (true){
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0){
+        const line = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (!line.startsWith("data: ")) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.t === "wait") hint("Đang xếp hàng…");
+        else if (ev.t === "start"){ started = true; hint("Đang trả lời…") }
+        else if (ev.t === "delta"){ answer += ev.v; bub.innerHTML = md(answer); bub.classList.add("typing"); scrollDown() }
+        else if (ev.t === "cut") note = ev.v;
+        else if (ev.t === "error") throw new Error(ev.v);
+      }
+    }
+  } catch(e){
+    if (e.name === "AbortError") note = "Đã dừng.";
+    else if (!answer) return undo(e.message || "Mất kết nối.");
+    else note = e.message || "Mất kết nối giữa chừng.";
+  } finally {
+    abub.querySelector(".bub") && abub.querySelector(".bub").classList.remove("typing");
+    streaming = null; setSending(false);
+  }
+  if (!answer){ return undo(note || "Không nhận được câu trả lời.") }
+  history = [...msgs, {role:"assistant", content:answer}];
+  store.set("history", history);
+  abub.replaceWith(bubble({role:"assistant", content:answer}, note ? `<div class="note">${esc(note)}</div>` : ""));
+  hint(note ? note : "Lịch sử trò chuyện chỉ nằm trong trình duyệt này, máy chủ không lưu.", !!note);
+  scrollDown();
+}
+
+function autosize(){ const b = $("box"); b.style.height = "auto"; b.style.height = Math.min(b.scrollHeight, 180) + "px" }
+$("box").addEventListener("input", autosize);
+$("box").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); send() } });
+boot();
+</script>
+</body>
+</html>
